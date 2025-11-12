@@ -1,5 +1,9 @@
-streamlit
-spacy
+#streamlit
+#spacy
 # Explicitly including the spaCy model as a pip installable package
 # This ensures the model data is available during deployment (e.g., on Streamlit Cloud)
-en_core_web_sm
+#en_core_web_sm
+streamlit>=1.30.0
+spacy>=3.7.2
+
+
