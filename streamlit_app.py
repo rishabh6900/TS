@@ -3,29 +3,68 @@ import spacy
 from spacy.lang.en.stop_words import STOP_WORDS
 import string
 from heapq import nlargest
+import os
+import sys
 
 # Load the spaCy model once and cache the result for performance
-# and to avoid re-loading the large model on every user interaction.
 @st.cache_resource
 def load_spacy_model():
-    """Load the language model and create a set of punctuations."""
-    # Use the Python package name directly. This is the most reliable way 
-    # when the model is installed via requirements.txt
-    import en_core_web_sm 
-    nlp = en_core_web_sm.load()
-    
+    """
+    Attempts to load the spaCy model 'en_core_web_sm'.
+    Includes a robust fallback for deployment environments where the model
+    might not be in spaCy's default search path.
+    """
+    model_name = 'en_core_web_sm'
+    try:
+        # 1. Attempt standard loading (most efficient if paths are correct)
+        nlp = spacy.load(model_name)
+    except OSError:
+        # 2. Fallback: Try to find the model in the site-packages directory
+        # This is a common location in isolated environments like Streamlit Cloud
+        
+        # Determine the base path for site-packages/lib
+        # For Linux deployments, this is often the venv's lib directory
+        base_path = os.path.join(sys.prefix, 'lib')
+        
+        # Check Python version to construct the correct path
+        python_version_dir = f'python{sys.version_info.major}.{sys.version_info.minor}'
+        
+        # Construct the expected path to the model package directory
+        model_path = os.path.join(base_path, python_version_dir, 'site-packages', model_name)
+        
+        # Check for alternative model paths which might be slightly different 
+        # based on the OS/environment setup.
+        if not os.path.isdir(model_path):
+            # Try a path for direct installation (no python version dir)
+             model_path = os.path.join(sys.prefix, 'lib', 'site-packages', model_name)
+
+        if os.path.isdir(model_path):
+            try:
+                # Load using the explicit path
+                nlp = spacy.load(model_path)
+                st.info(f"Successfully loaded spaCy model from custom path: {model_path}")
+            except Exception as path_e:
+                raise Exception(f"Failed to load model from both standard location and custom path: {path_e}")
+        else:
+            # If the path is not found, raise the original error for debugging
+            raise
+
     # Combine standard punctuation with newline character
     punctuations = string.punctuation + '\n'
     return nlp, list(STOP_WORDS), punctuations
 
 # Initialize global resources
 try:
+    # Remove the old import error check here, as the loading function now handles it
     nlp, stopwords, punctuations = load_spacy_model()
 except Exception as e:
+    # Catch any error from load_spacy_model, including the final failure
     st.error(
-        f"An error occurred during model loading. Ensure spaCy and its model are installed correctly. Error details: {e}"
+        f"Fatal Error: Could not load the spaCy model 'en_core_web_sm'. "
+        "Please check your deployment logs and ensure the model is installed."
     )
-    # Use st.stop() to prevent the rest of the script from executing if the model load fails
+    # Display the specific error message for better debugging
+    st.exception(e) 
     st.stop()
 
 
@@ -36,7 +75,6 @@ def summarize_text_extractive(text, percentage=0.3):
     if not text or percentage <= 0:
         return ""
 
-    # doc = nlp(text) is already using the globally loaded nlp object
     doc = nlp(text)
 
     # 1. Word Frequency Calculation (Cleaning and Tokenization implicit)
@@ -108,8 +146,9 @@ percentage = st.slider(
 if st.button("Generate Summary", type="primary"):
     if text_input:
         # Check if nlp object is available before processing
+        # This check is technically redundant due to st.stop() above, but is a safe guard
         if 'nlp' not in globals() or nlp is None:
-            st.warning("Model failed to load. Please check installation logs.")
+            st.warning("Model failed to load during startup. Cannot process request.")
             st.stop()
             
         with st.spinner('Summarizing text... This may take a moment for large documents.'):
@@ -142,3 +181,4 @@ if st.button("Generate Summary", type="primary"):
 
     else:
         st.warning("Please paste some text into the box above and try again.")
+
