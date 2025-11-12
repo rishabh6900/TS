@@ -9,8 +9,11 @@ from heapq import nlargest
 @st.cache_resource
 def load_spacy_model():
     """Load the language model and create a set of punctuations."""
-    # Note: 'en_core_web_sm' must be available in the deployment environment
-    nlp = spacy.load('en_core_web_sm')
+    # Use the Python package name directly. This is the most reliable way 
+    # when the model is installed via requirements.txt
+    import en_core_web_sm 
+    nlp = en_core_web_sm.load()
+    
     # Combine standard punctuation with newline character
     punctuations = string.punctuation + '\n'
     return nlp, list(STOP_WORDS), punctuations
@@ -18,10 +21,9 @@ def load_spacy_model():
 # Initialize global resources
 try:
     nlp, stopwords, punctuations = load_spacy_model()
-except OSError:
+except Exception as e:
     st.error(
-        "Model 'en_core_web_sm' not found. "
-        "Please ensure it is listed in your requirements.txt for deployment."
+        f"An error occurred during model loading. Ensure spaCy and its model are installed correctly. Error details: {e}"
     )
     # Use st.stop() to prevent the rest of the script from executing if the model load fails
     st.stop()
@@ -34,6 +36,7 @@ def summarize_text_extractive(text, percentage=0.3):
     if not text or percentage <= 0:
         return ""
 
+    # doc = nlp(text) is already using the globally loaded nlp object
     doc = nlp(text)
 
     # 1. Word Frequency Calculation (Cleaning and Tokenization implicit)
@@ -104,6 +107,11 @@ percentage = st.slider(
 
 if st.button("Generate Summary", type="primary"):
     if text_input:
+        # Check if nlp object is available before processing
+        if 'nlp' not in globals() or nlp is None:
+            st.warning("Model failed to load. Please check installation logs.")
+            st.stop()
+            
         with st.spinner('Summarizing text... This may take a moment for large documents.'):
             summary = summarize_text_extractive(text_input, percentage)
 
