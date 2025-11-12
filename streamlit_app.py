@@ -3,69 +3,80 @@ import spacy
 from spacy.lang.en.stop_words import STOP_WORDS
 import string
 from heapq import nlargest
-import os
+import subprocess
 import sys
+
+# Define the model name globally
+MODEL_NAME = 'en_core_web_sm'
 
 # Load the spaCy model once and cache the result for performance
 @st.cache_resource
 def load_spacy_model():
     """
-    Attempts to load the spaCy model 'en_core_web_sm'.
-    Includes a robust fallback for deployment environments where the model
-    might not be in spaCy's default search path.
+    Attempts to load the spaCy model. If it fails due to a missing file (E050),
+    it executes a subprocess command to download and install the model into the
+    current virtual environment during runtime.
     """
-    model_name = 'en_core_web_sm'
     try:
-        # 1. Attempt standard loading (most efficient if paths are correct)
-        nlp = spacy.load(model_name)
-    except OSError:
-        # 2. Fallback: Try to find the model in the site-packages directory
-        # This is a common location in isolated environments like Streamlit Cloud
+        # 1. Attempt standard loading
+        nlp = spacy.load(MODEL_NAME)
+        return nlp
+    except OSError as e:
+        # Check if the error is the specific E050 (Model not found)
+        # Note: Streamlit redacts the E050 message, but if a load fails, this is the most likely cause.
         
-        # Determine the base path for site-packages/lib
-        # For Linux deployments, this is often the venv's lib directory
-        base_path = os.path.join(sys.prefix, 'lib')
+        st.warning(f"spaCy model '{MODEL_NAME}' not found. Attempting to download and install it now...")
         
-        # Check Python version to construct the correct path
-        python_version_dir = f'python{sys.version_info.major}.{sys.version_info.minor}'
+        # Determine the Python executable to ensure the model installs into the correct environment (venv)
+        python_executable = sys.executable
         
-        # Construct the expected path to the model package directory
-        model_path = os.path.join(base_path, python_version_dir, 'site-packages', model_name)
+        try:
+            # Execute the download command as a subprocess.
+            # We use '--no-warn' and '--quiet' to minimize console output noise during deployment.
+            # We use 'run' to wait for the command to complete.
+            result = subprocess.run([
+                python_executable, 
+                "-m", 
+                "spacy", 
+                "download", 
+                MODEL_NAME, 
+                "--no-warn",
+                "--quiet"
+            ], check=True, capture_output=True, text=True)
+            
+            # 2. Try loading again after successful download
+            nlp = spacy.load(MODEL_NAME)
+            st.success(f"Successfully downloaded and loaded model '{MODEL_NAME}' at runtime.")
+            return nlp
+            
+        except subprocess.CalledProcessError as sub_e:
+            st.error("Failed to download model via subprocess.")
+            st.code(f"STDOUT: {sub_e.stdout}\nSTDERR: {sub_e.stderr}")
+            raise Exception(f"Model download failed: {sub_e}")
         
-        # Check for alternative model paths which might be slightly different 
-        # based on the OS/environment setup.
-        if not os.path.isdir(model_path):
-            # Try a path for direct installation (no python version dir)
-             model_path = os.path.join(sys.prefix, 'lib', 'site-packages', model_name)
-
-        if os.path.isdir(model_path):
-            try:
-                # Load using the explicit path
-                nlp = spacy.load(model_path)
-                st.info(f"Successfully loaded spaCy model from custom path: {model_path}")
-            except Exception as path_e:
-                raise Exception(f"Failed to load model from both standard location and custom path: {path_e}")
-        else:
-            # If the path is not found, raise the original error for debugging
-            raise
-
-    # Combine standard punctuation with newline character
-    punctuations = string.punctuation + '\n'
-    return nlp, list(STOP_WORDS), punctuations
+        except Exception as retry_e:
+            raise Exception(f"Model downloaded but failed to load: {retry_e}")
 
 # Initialize global resources
 try:
-    # Remove the old import error check here, as the loading function now handles it
-    nlp, stopwords, punctuations = load_spacy_model()
+    # Load NLP object first
+    nlp = load_spacy_model()
+    
+    # Initialize other variables after nlp object is secured
+    punctuations = string.punctuation + '\n'
+    stopwords = list(STOP_WORDS)
+    
 except Exception as e:
     # Catch any error from load_spacy_model, including the final failure
     st.error(
-        f"Fatal Error: Could not load the spaCy model 'en_core_web_sm'. "
-        "Please check your deployment logs and ensure the model is installed."
+        f"Fatal Error: Could not initialize spaCy resources. "
+        "Please check your deployment logs for model installation failures."
     )
-    # Display the specific error message for better debugging
     st.exception(e) 
     st.stop()
+    
+# Assign final variables outside the try/except if successful
+nlp, stopwords, punctuations = nlp, stopwords, punctuations
 
 
 def summarize_text_extractive(text, percentage=0.3):
@@ -146,7 +157,6 @@ percentage = st.slider(
 if st.button("Generate Summary", type="primary"):
     if text_input:
         # Check if nlp object is available before processing
-        # This check is technically redundant due to st.stop() above, but is a safe guard
         if 'nlp' not in globals() or nlp is None:
             st.warning("Model failed to load during startup. Cannot process request.")
             st.stop()
@@ -181,4 +191,5 @@ if st.button("Generate Summary", type="primary"):
 
     else:
         st.warning("Please paste some text into the box above and try again.")
+
 
