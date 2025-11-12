@@ -1,3 +1,5 @@
 streamlit
 spacy
-https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.7.1/en_core_web_sm-3.7.1.tar.gz#egg=en_core_web_sm
+# Explicitly including the spaCy model as a pip installable package
+# This ensures the model data is available during deployment (e.g., on Streamlit Cloud)
+en_core_web_sm
